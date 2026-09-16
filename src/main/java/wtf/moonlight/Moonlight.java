@@ -33,6 +33,7 @@ import wtf.moonlight.gui.notification.NotificationManager;
 import wtf.moonlight.gui.notification.NotificationType;
 import wtf.moonlight.gui.widget.WidgetManager;
 import wtf.moonlight.utils.discord.DiscordInfo;
+import wtf.moonlight.utils.android.AndroidCompat;
 import wtf.moonlight.utils.misc.SpoofSlotUtils;
 import wtf.moonlight.utils.packet.BadPacketsComponent;
 import wtf.moonlight.utils.packet.BlinkComponent;
@@ -175,6 +176,16 @@ public class Moonlight {
     }
 
     private void setupDiscordRPC() {
+        // 安卓启动器无 discord-rpc 原生库；且旧逻辑可能 System.exit
+        if (AndroidCompat.isAndroid()) {
+            discordRP = new DiscordInfo();
+            try {
+                discordRP.init(); // 内部会 no-op
+            } catch (Throwable ignored) {
+            }
+            LOGGER.info("Discord Rich Presence skipped (Android).");
+            return;
+        }
         try {
             discordRP = new DiscordInfo();
             discordRP.init();
@@ -185,6 +196,10 @@ public class Moonlight {
     }
 
     private void setupSystemTray() {
+        if (AndroidCompat.isAndroid()) {
+            LOGGER.info("System tray skipped (Android).");
+            return;
+        }
         if (isWindows() && SystemTray.isSupported()) {
             try {
                 Image trayImage = ImageIO.read(Objects.requireNonNull(getClass().getResourceAsStream("/assets/minecraft/moonlight/img/logo.png")));
@@ -197,7 +212,9 @@ public class Moonlight {
 
                 LOGGER.info("System tray icon added.");
             } catch (IOException | AWTException | NullPointerException e) {
-                LOGGER.error("Failed to create or add TrayIcon.", e);
+                LOGGER.error("Failed to set up TrayIcon.", e);
+            } catch (Throwable e) {
+                LOGGER.error("TrayIcon failed.", e);
             }
         } else {
             LOGGER.warn("System tray not supported or not running on Windows.");
@@ -205,10 +222,22 @@ public class Moonlight {
     }
 
     private void handleFastRender() {
-        if (Minecraft.getMinecraft().gameSettings.ofFastRender) {
-            notificationManager.post(NotificationType.WARNING, "Fast Rendering has been disabled", "due to compatibility issues");
-            Minecraft.getMinecraft().gameSettings.ofFastRender = false;
-            LOGGER.info("Fast Rendering was disabled due to compatibility issues.");
+        try {
+            if (Minecraft.getMinecraft().gameSettings.ofFastRender) {
+                notificationManager.post(NotificationType.WARNING, "Fast Rendering has been disabled", "due to compatibility issues");
+                Minecraft.getMinecraft().gameSettings.ofFastRender = false;
+                LOGGER.info("Fast Rendering was disabled due to compatibility issues.");
+            }
+            // 安卓 GLES：建议关闭高级特效相关项（若字段存在）
+            if (AndroidCompat.isAndroid()) {
+                try {
+                    Minecraft.getMinecraft().gameSettings.ofFastRender = false;
+                } catch (Throwable ignored) {
+                }
+                LOGGER.info("Android: forced ofFastRender=false for GLES stability.");
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("handleFastRender skipped: {}", t.toString());
         }
     }
 
