@@ -1,6 +1,6 @@
 /*
  * MoonLight Hacked Client
- * Discord RPC — 安卓上完全跳过（无原生库，且原逻辑 userId==null 会 System.exit）
+ * Discord RPC — 安卓上完全跳过；桌面用 getCurrentServerIP（无 getRemoteIp）
  */
 package wtf.moonlight.utils.discord;
 
@@ -37,7 +37,6 @@ public class DiscordInfo implements InstanceAccess {
     }
 
     public void init() {
-        // 安卓：不加载 discord-rpc 原生库，也不跑后台线程
         if (AndroidCompat.isAndroid()) {
             name = "Android";
             System.out.println("[Discord] Skipped on Android launcher.");
@@ -50,7 +49,6 @@ public class DiscordInfo implements InstanceAccess {
             if (discordUser.userId != null) {
                 name = discordUser.username + (discordUser.discriminator.equals("0") ? "" : discordUser.discriminator);
             } else {
-                // 原版 System.exit(0) 在安卓/无 Discord 时会直接杀进程 — 已移除
                 System.out.println("[Discord] userId null, ignore (no exit).");
                 name = "Player";
             }
@@ -74,7 +72,7 @@ public class DiscordInfo implements InstanceAccess {
                             update("Ig: " + detectUsername(), "is in SinglePlayer", true);
                             updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled" + " | " + "Kills: " + killed + " | Wins: " + win);
                         } else if (mc.getCurrentServerData() != null && !(mc.currentScreen instanceof GuiDownloadTerrain)) {
-                            update("Ig: " + detectUsername(), "is on " + ServerUtils.getRemoteIp()
+                            update("Ig: " + detectUsername(), "is on " + ServerUtils.getCurrentServerIP()
                                     + " " + "(" + mc.getCurrentServerData().populationInfo + ")", true);
                             updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled" + " | " + "Kills: " + killed + " | Wins: " + win);
                         } else {
@@ -93,7 +91,10 @@ public class DiscordInfo implements InstanceAccess {
                     }
                 } catch (Throwable ignored) {
                 }
-                DiscordRPC.discordRunCallbacks();
+                try {
+                    DiscordRPC.discordRunCallbacks();
+                } catch (Throwable ignored) {
+                }
                 try {
                     Thread.sleep(2000L);
                 } catch (InterruptedException e) {
