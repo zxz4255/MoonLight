@@ -2,9 +2,9 @@ name: build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 env:
@@ -19,6 +19,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    # Release 需要写权限（upload-artifact 不需要）
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -30,16 +34,6 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: 'gradle'
 
-      - name: Configure Gradle Cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper/
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
-
       - name: Grant Execute Permission for gradlew
         run: chmod +x ./gradlew
 
@@ -48,8 +42,18 @@ jobs:
 
       - name: Rename and Move Files to Root
         run: |
-          mv ${BUILD_DIR}/Moonlight-1.8.9-all.jar ${GITHUB_WORKSPACE}/${JAR_NAME}
-          mv ${JSON_DIR}/MoonLight.json ${GITHUB_WORKSPACE}/${JSON_NAME}
+          # 兼容不同 shadow 产物名
+          JAR=$(ls ${BUILD_DIR}/*-all.jar ${BUILD_DIR}/*.jar 2>/dev/null | head -1)
+          if [ -z "$JAR" ]; then
+            echo "No jar found in ${BUILD_DIR}"
+            ls -la ${BUILD_DIR} || true
+            exit 1
+          fi
+          cp "$JAR" "${GITHUB_WORKSPACE}/${JAR_NAME}"
+          cp "${JSON_DIR}/MoonLight.json" "${GITHUB_WORKSPACE}/${JSON_NAME}" 2>/dev/null \
+            || cp "${JSON_DIR}/Moonlight.json" "${GITHUB_WORKSPACE}/${JSON_NAME}" 2>/dev/null \
+            || true
+          ls -la "${GITHUB_WORKSPACE}/${JAR_NAME}" "${GITHUB_WORKSPACE}/${JSON_NAME}" || true
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -58,14 +62,19 @@ jobs:
           path: |
             ${{ env.JAR_NAME }}
             ${{ env.JSON_NAME }}
+          if-no-files-found: warn
 
-      - name: Create Release
-        uses: "0xDylan/action-auto-releases-n20@v1.1"
+      # 仅 push 到主分支时打 latest 预发布（PR 不发 Release）
+      - name: Create / Update Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: softprops/action-gh-release@v2
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "latest"
+          tag_name: latest
+          name: Latest Build
           prerelease: true
-          title: "Latest Build"
+          generate_release_notes: true
           files: |
             ${{ env.JAR_NAME }}
             ${{ env.JSON_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
