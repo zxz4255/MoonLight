@@ -1,12 +1,6 @@
 /*
  * MoonLight Hacked Client
- *
- * A free and open-source hacked client for Minecraft.
- * Developed using Minecraft's resources.
- *
- * Repository: https://github.com/randomguy3725/MoonLight
- *
- * Author(s): [Randumbguy & wxdbie & opZywl & MukjepScarlet & lucas & eonian]
+ * Discord RPC — 安卓上完全跳过（无原生库，且原逻辑 userId==null 会 System.exit）
  */
 package wtf.moonlight.utils.discord;
 
@@ -20,6 +14,7 @@ import net.minecraft.client.gui.GuiSelectWorld;
 import wtf.moonlight.features.modules.Module;
 import wtf.moonlight.features.modules.impl.visual.Interface;
 import wtf.moonlight.utils.InstanceAccess;
+import wtf.moonlight.utils.android.AndroidCompat;
 import wtf.moonlight.utils.concurrent.Workers;
 import wtf.moonlight.utils.misc.ServerUtils;
 
@@ -27,11 +22,11 @@ public class DiscordInfo implements InstanceAccess {
     private boolean running = true;
     private long timeElapsed = 0;
     @Getter
-    private String name;
+    private String name = "Player";
     @Getter
-    private String id;
+    private String id = "";
     @Getter
-    private String smallImageText;
+    private String smallImageText = "";
 
     public int getTotal() {
         return INSTANCE.getModuleManager().getModules().size();
@@ -42,81 +37,107 @@ public class DiscordInfo implements InstanceAccess {
     }
 
     public void init() {
+        // 安卓：不加载 discord-rpc 原生库，也不跑后台线程
+        if (AndroidCompat.isAndroid()) {
+            name = "Android";
+            System.out.println("[Discord] Skipped on Android launcher.");
+            return;
+        }
+
         this.timeElapsed = System.currentTimeMillis();
         DiscordEventHandlers handlers = new DiscordEventHandlers.Builder().setReadyEventHandler(discordUser -> {
             System.out.println("[Discord] Connected to user " + discordUser.username + "#" + discordUser.discriminator);
             if (discordUser.userId != null) {
                 name = discordUser.username + (discordUser.discriminator.equals("0") ? "" : discordUser.discriminator);
             } else {
-                System.exit(0);
+                // 原版 System.exit(0) 在安卓/无 Discord 时会直接杀进程 — 已移除
+                System.out.println("[Discord] userId null, ignore (no exit).");
+                name = "Player";
             }
         }).build();
 
-        DiscordRPC.discordInitialize("1266031153572479107", handlers, true);
+        try {
+            DiscordRPC.discordInitialize("1266031153572479107", handlers, true);
+        } catch (Throwable t) {
+            System.out.println("[Discord] Initialize failed: " + t.getMessage());
+            running = false;
+            return;
+        }
+
         Workers.IO.execute(() -> {
             while (running) {
-                int killed = INSTANCE.getModuleManager().getModule(Interface.class).killed;
-                int win = INSTANCE.getModuleManager().getModule(Interface.class).won;
-                if (mc.thePlayer != null) {
-                    if (mc.isSingleplayer()) {
-                        update("Ig: " + detectUsername(), "is in SinglePlayer", true);
-                        updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled");
-                    } else if (mc.getCurrentServerData() != null) {
-                        if (ServerUtils.isOnHypixel()) {
-                            update("Ig: " + detectUsername(), "Kills: " + killed + " " + "Wins: " + win, true);
-                            updateSmallImageText("playing on '" + mc.getCurrentServerData().serverIP + "' with " + getCount() + "/" + getTotal() + " modules Enabled");
-                        } else {
-                            update("Ig: " + detectUsername(), "is playing on " + mc.getCurrentServerData().serverIP, true);
-                            updateSmallImageText("raping kids | " + getCount() + "/" + getTotal() + " modules Enabled");
-                        }
-                    } else if (mc.currentScreen instanceof GuiDownloadTerrain) {
-                        update("...", "", false);
-                    }
-                } else {
-                    if (mc.currentScreen instanceof GuiSelectWorld) {
-                        update("Selecting World...", "", false);
-                    } else if (mc.currentScreen instanceof GuiMultiplayer) {
-                        update("Selecting Server...", "", false);
-                    } else if (mc.currentScreen instanceof GuiDownloadTerrain) {
-                        update("...", "", false);
-                    } else {
-                        update("Idling...", "", false);
-                    }
-                }
-
                 try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    break;
+                    int killed = INSTANCE.getModuleManager().getModule(Interface.class).killed;
+                    int win = INSTANCE.getModuleManager().getModule(Interface.class).won;
+                    if (mc.thePlayer != null) {
+                        if (mc.isSingleplayer()) {
+                            update("Ig: " + detectUsername(), "is in SinglePlayer", true);
+                            updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled" + " | " + "Kills: " + killed + " | Wins: " + win);
+                        } else if (mc.getCurrentServerData() != null && !(mc.currentScreen instanceof GuiDownloadTerrain)) {
+                            update("Ig: " + detectUsername(), "is on " + ServerUtils.getRemoteIp()
+                                    + " " + "(" + mc.getCurrentServerData().populationInfo + ")", true);
+                            updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled" + " | " + "Kills: " + killed + " | Wins: " + win);
+                        } else {
+                            update("Ig: " + detectUsername(), "is loading a Server", true);
+                            updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled" + " | " + "Kills: " + killed + " | Wins: " + win);
+                        }
+                    } else if (mc.currentScreen instanceof GuiSelectWorld) {
+                        update("Ig: " + detectUsername(), "is selecting a world", true);
+                        updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled" + " | " + "Kills: " + killed + " | Wins: " + win);
+                    } else if (mc.currentScreen instanceof GuiMultiplayer) {
+                        update("Ig: " + detectUsername(), "is selecting a server", true);
+                        updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled" + " | " + "Kills: " + killed + " | Wins: " + win);
+                    } else {
+                        update("Ig: " + detectUsername(), "is in MainMenu", true);
+                        updateSmallImageText(getCount() + "/" + getTotal() + " modules Enabled" + " | " + "Kills: " + killed + " | Wins: " + win);
+                    }
+                } catch (Throwable ignored) {
                 }
-
                 DiscordRPC.discordRunCallbacks();
+                try {
+                    Thread.sleep(2000L);
+                } catch (InterruptedException e) {
+                    running = false;
+                }
             }
         });
     }
 
-    public void stop() {
-        running = false;
-        DiscordRPC.discordShutdown();
-    }
-
-    public String detectUsername() {
-        String string;
-        string = mc.thePlayer.getName();
-
-        return string;
-    }
-
-    public void update(String line1, String line2, Boolean smallImage) {
-        DiscordRichPresence.Builder rpc = new DiscordRichPresence.Builder(line2).setDetails(line1).setBigImage("logo", "Moonlight [#" + INSTANCE.version + "]");
-        if (smallImage) {
-            rpc.setSmallImage("closer", smallImageText);
+    public void update(String firstLine, String secondLine, boolean showTimeElapsed) {
+        if (AndroidCompat.isAndroid() || !running) return;
+        try {
+            DiscordRichPresence.Builder b = new DiscordRichPresence.Builder(secondLine);
+            b.setBigImage("logo", "MoonLight");
+            b.setDetails(firstLine);
+            if (showTimeElapsed) {
+                b.setStartTimestamps(timeElapsed);
+            }
+            b.setSmallImage("icon", smallImageText);
+            DiscordRPC.discordUpdatePresence(b.build());
+        } catch (Throwable ignored) {
         }
-        rpc.setStartTimestamps(timeElapsed);
-        DiscordRPC.discordUpdatePresence(rpc.build());
     }
 
     public void updateSmallImageText(String text) {
-        smallImageText = text;
+        this.smallImageText = text;
+    }
+
+    private String detectUsername() {
+        try {
+            if (mc.getSession() != null && mc.getSession().getUsername() != null) {
+                return mc.getSession().getUsername();
+            }
+        } catch (Throwable ignored) {
+        }
+        return name != null ? name : "Player";
+    }
+
+    public void stop() {
+        running = false;
+        if (AndroidCompat.isAndroid()) return;
+        try {
+            DiscordRPC.discordShutdown();
+        } catch (Throwable ignored) {
+        }
     }
 }
